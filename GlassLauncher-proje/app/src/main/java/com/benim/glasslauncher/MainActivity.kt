@@ -10,7 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
@@ -36,6 +36,8 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.abs
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -150,51 +152,127 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ------------------------------------------------------------------ ARKA PLAN
-// Keskin hatlı şekiller: cam kartın arkasında bulanınca fark belli olsun diye.
-private fun DrawScope.drawLiquid(p: Float, q: Float) {
+// ------------------------------------------------------------------ ARKA PLAN: KARLI DAĞLAR
+// Her şey kodla çizilir. t: 0..1 arasında döner (180 sn'de bir tur), par: gezinirken oluşan kayma.
+private fun frac(x: Float) = x - kotlin.math.floor(x)
+
+// Sivri tepeli dağ hattı (0..1). u'nun 1 birim kayması kusursuz döngü verir.
+private fun ridge(u: Float, s: Int): Float {
+    fun r(k: Int, ph: Float) = 1f - abs(sin(PI.toFloat() * (k * u + ph)))
+    return 0.5f * r(3, s * 0.37f) + 0.3f * r(7, s * 0.61f) + 0.2f * r(13, s * 0.13f)
+}
+
+private fun DrawScope.drawRidge(shift: Float, seed: Int, baseY: Float, amp: Float,
+                                snow: Color, mid: Color, low: Color) {
+    val w = size.width
+    val path = Path()
+    path.moveTo(0f, size.height)
+    var x = 0f
+    while (x <= w + 8f) {
+        path.lineTo(x, baseY - amp * ridge(x / w + shift, seed))
+        x += 8f
+    }
+    path.lineTo(w, size.height)
+    path.close()
+    // Yüksek yerler kar beyazı, aşağısı kaya rengi
+    drawPath(path, Brush.verticalGradient(
+        0f to snow, 0.35f to snow, 0.55f to mid, 1f to low,
+        startY = baseY - amp, endY = size.height))
+}
+
+private fun DrawScope.drawScene(t: Float, par: Float) {
     val w = size.width; val h = size.height
-    drawRect(Color(0xFF0B1020))
-    fun disc(c1: Color, c2: Color, x: Float, y: Float, r: Float) = drawCircle(
-        Brush.linearGradient(listOf(c1, c2), Offset(x - r, y - r), Offset(x + r, y + r)), r, Offset(x, y))
-    disc(Color(0xFF6C5CE7), Color(0xFFA29BFE), w * (0.15f + 0.45f * p), h * (0.25f + 0.25f * q), h * 0.32f)
-    disc(Color(0xFF00CEC9), Color(0xFF55EFC4), w * (0.85f - 0.45f * p), h * (0.7f - 0.25f * q), h * 0.38f)
-    disc(Color(0xFFFF7675), Color(0xFFFDCB6E), w * (0.5f + 0.25f * q), h * (0.95f - 0.45f * p), h * 0.26f)
-    drawCircle(Color.White.copy(0.22f), h * 0.45f, Offset(w * (0.6f - 0.3f * q), h * (0.3f + 0.2f * p)), style = Stroke(18f))
-    drawCircle(Color.White.copy(0.15f), h * 0.2f, Offset(w * (0.2f + 0.2f * p), h * 0.8f), style = Stroke(10f))
-    rotate(-22f, Offset(w / 2, h / 2)) {
-        drawRoundRect(Color.White.copy(0.13f), Offset(w * (0.1f + 0.7f * q), -h * 0.3f),
-            Size(70f, h * 1.8f), CornerRadius(35f))
-        drawRoundRect(Color.White.copy(0.09f), Offset(w * (0.8f - 0.6f * p), -h * 0.3f),
-            Size(40f, h * 1.8f), CornerRadius(20f))
+    val twoPi = 2f * PI.toFloat()
+
+    // Gökyüzü (şafak)
+    drawRect(Brush.verticalGradient(
+        listOf(Color(0xFF0B1636), Color(0xFF28497C), Color(0xFFE9B7A3)), startY = 0f, endY = h * 0.75f))
+    // Yıldızlar
+    for (i in 0 until 40) {
+        val a = 0.35f + 0.35f * sin(twoPi * (t * 6f + i * 0.1f))
+        drawCircle(Color.White.copy(alpha = a), 1.6f,
+            Offset(frac(i * 0.618f + 0.3f) * w, frac(i * 0.382f) * h * 0.4f))
+    }
+    // Ay ve parıltısı
+    val mc = Offset(w * 0.8f, h * 0.17f)
+    drawCircle(Brush.radialGradient(listOf(Color.White.copy(0.35f), Color.Transparent), center = mc, radius = h * 0.2f),
+        h * 0.2f, mc)
+    drawCircle(Color(0xFFFFF6E5), h * 0.045f, mc)
+
+    // Uzak dağlar
+    drawRidge(t * 1f + par * 0.3f, 1, h * 0.62f, h * 0.30f,
+        Color(0xFFF4F8FF), Color(0xFF9DB4D3), Color(0xFF6B84AA))
+    // Sis
+    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.White.copy(0.28f)),
+        startY = h * 0.5f, endY = h * 0.75f), Offset(0f, h * 0.5f), Size(w, h * 0.25f))
+    // Süzülen bulutlar
+    for (i in 0 until 3) {
+        val cx = frac(i * 0.37f + t * (1 + i)) * (w + 600f) - 300f
+        val cy = h * (0.22f + 0.1f * i)
+        scale(1f, 0.3f, Offset(cx, cy)) {
+            drawCircle(Brush.radialGradient(listOf(Color.White.copy(0.22f), Color.Transparent),
+                center = Offset(cx, cy), radius = 260f), 260f, Offset(cx, cy))
+        }
+    }
+    // Orta ve yakın dağlar (daha hızlı kayarlar = derinlik hissi)
+    drawRidge(t * 2f + par * 0.6f, 2, h * 0.76f, h * 0.30f,
+        Color.White, Color(0xFF7D93B5), Color(0xFF3E5577))
+    drawRidge(t * 3f + par * 1f, 3, h * 0.94f, h * 0.30f,
+        Color.White, Color(0xFF52688C), Color(0xFF16233C))
+
+    // Yağan kar
+    for (i in 0 until 90) {
+        val sx = frac(i * 0.618f + 0.13f); val sy = frac(i * 0.381f + 0.37f)
+        val k = 18 + 9 * (i % 3)
+        val y = frac(sy + t * k) * (h + 20f) - 10f
+        val x = sx * w + sin(twoPi * (t * 10f + sx)) * 30f
+        drawCircle(Color.White.copy(alpha = 0.55f + 0.1f * (i % 3)), 1.5f + (i % 3) * 1.2f, Offset(x, y))
     }
 }
 
+// ------------------------------------------------------------------ ANA EKRAN
+private val CARD_W = 260.dp
+
 @Composable
 fun GlassLauncher(apps: List<AppItem>, onTick: (Int) -> Unit, onOpen: (String) -> Unit) {
-    val t = rememberInfiniteTransition(label = "bg")
-    val p by t.animateFloat(0f, 1f, infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Reverse), label = "p")
-    val q by t.animateFloat(1f, 0f, infiniteRepeatable(tween(23000, easing = LinearEasing), RepeatMode.Reverse), label = "q")
+    val tr = rememberInfiniteTransition(label = "bg")
+    val t by tr.animateFloat(0f, 1f,
+        infiniteRepeatable(tween(180000, easing = LinearEasing), RepeatMode.Restart), label = "t")
 
-    // Arka planın BULANIK kopyası: tek sefer bulanır, tüm kartlar bundan dilim alır (hızlı).
+    // Yana gezindikçe dağlar da yavaşça kayar
+    var focusIdx by remember { mutableIntStateOf(0) }
+    val par by animateFloatAsState(focusIdx * 0.025f, tween(1200, easing = FastOutSlowInEasing), label = "par")
+
+    // Arka planın BULANIK kopyası (liquid glass için)
     val blurLayer = rememberGraphicsLayer()
     SideEffect { blurLayer.renderEffect = BlurEffect(42f, 42f, TileMode.Clamp) }
 
+    // Odaklanan kart ekranın ortasına akıcı şekilde kayar
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    LaunchedEffect(focusIdx, apps.size) {
+        if (apps.isNotEmpty()) {
+            val vw = listState.layoutInfo.viewportSize.width
+            val iw = with(density) { CARD_W.roundToPx() }
+            listState.animateScrollToItem(focusIdx.coerceAtMost(apps.size - 1), -(vw / 2 - iw / 2))
+        }
+    }
+
     Box(Modifier.fillMaxSize().drawBehind {
-        blurLayer.record(this, layoutDirection, IntSize(size.width.toInt(), size.height.toInt())) { drawLiquid(p, q) }
-        drawLiquid(p, q)
+        blurLayer.record(this, layoutDirection, IntSize(size.width.toInt(), size.height.toInt())) { drawScene(t, par) }
+        drawScene(t, par)
     }) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 36.dp)) {
-            Clock()
-            Spacer(Modifier.height(28.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(230.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
-                contentPadding = PaddingValues(vertical = 24.dp, horizontal = 12.dp)
+        Column(Modifier.fillMaxSize().padding(top = 36.dp, bottom = 24.dp)) {
+            Box(Modifier.padding(start = 56.dp)) { Clock() }
+            Spacer(Modifier.weight(1f))
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
+                contentPadding = PaddingValues(horizontal = 56.dp, vertical = 48.dp)
             ) {
                 itemsIndexed(apps, key = { _, a -> a.pkg }) { i, app ->
-                    GlassCard(app, i, blurLayer, onTick) { onOpen(app.pkg) }
+                    GlassCard(app, i, blurLayer, { idx -> focusIdx = idx; onTick(idx) }) { onOpen(app.pkg) }
                 }
             }
         }
@@ -205,11 +283,12 @@ fun GlassLauncher(apps: List<AppItem>, onTick: (Int) -> Unit, onOpen: (String) -
 fun Clock() {
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); delay(1000) } }
+    val sh = Shadow(Color.Black.copy(0.5f), Offset(0f, 2f), 8f)
     Column {
         BasicText(SimpleDateFormat("HH:mm", Locale.getDefault()).format(now),
-            style = TextStyle(Color.White, 56.sp, FontWeight.Light))
+            style = TextStyle(Color.White, 56.sp, FontWeight.Light, shadow = sh))
         BasicText(SimpleDateFormat("d MMMM EEEE", Locale.getDefault()).format(now),
-            style = TextStyle(Color.White.copy(0.75f), 20.sp))
+            style = TextStyle(Color.White.copy(0.85f), 20.sp, shadow = sh))
     }
 }
 
@@ -237,23 +316,25 @@ fun GlassCard(app: AppItem, index: Int, backdrop: GraphicsLayer, onTick: (Int) -
 
     Column(
         Modifier
+            .width(CARD_W)
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
                 scaleX = scale; scaleY = scale
                 alpha = enter.value
-                translationY = (1f - enter.value) * 60f
+                translationX = (1f - enter.value) * 80f
             }
             .shadow(if (focused) 26.dp else 4.dp, shape, ambientColor = Color.White, spotColor = Color.White)
             .clip(shape)
             .onGloballyPositioned { pos = it.positionInRoot() }
-            // 1) Gerçek cam: arkadaki bulanık görüntü, hafif büyütülmüş (lens etkisi)
+            // 1) Gerçek cam: arkadaki bulanık dağ, hafif büyütülmüş (lens etkisi)
             .drawBehind {
                 val c = Offset(pos.x + size.width / 2, pos.y + size.height / 2)
                 translate(-pos.x, -pos.y) { scale(1.08f, 1.08f, pivot = c) { drawLayer(backdrop) } }
             }
-            // 2) Hafif beyaz cam tonu + üstten ışık
+            // 2) Karın üstünde yazı okunsun diye hafif koyu ton + beyaz cam ışığı
+            .background(Color(0xFF0B1730).copy(alpha = 0.28f))
             .background(Brush.verticalGradient(listOf(
-                Color.White.copy(0.20f + 0.12f * glow), Color.White.copy(0.06f + 0.06f * glow))))
+                Color.White.copy(0.20f + 0.12f * glow), Color.White.copy(0.05f + 0.06f * glow))))
             // 3) Odaklanınca üzerinden süzülen parlama
             .drawWithContent {
                 drawContent()
@@ -280,6 +361,8 @@ fun GlassCard(app: AppItem, index: Int, backdrop: GraphicsLayer, onTick: (Int) -
         Spacer(Modifier.height(8.dp))
         BasicText(app.label,
             Modifier.padding(horizontal = 6.dp, vertical = 4.dp).align(Alignment.CenterHorizontally),
-            maxLines = 1, style = TextStyle(Color.White, 16.sp, FontWeight.Medium))
+            maxLines = 1,
+            style = TextStyle(Color.White, 16.sp, FontWeight.Medium,
+                shadow = Shadow(Color.Black.copy(0.5f), Offset(0f, 2f), 6f)))
     }
 }
